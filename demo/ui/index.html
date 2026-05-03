@@ -1,340 +1,504 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Engram — Memory Dashboard</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-                         'Helvetica Neue', Arial, sans-serif;
-            background: #0f1117;
-            color: #e0e0e0;
-            min-height: 100vh;
-        }
-
-        header {
-            background: #1a1d27;
-            border-bottom: 1px solid #2a2d3a;
-            padding: 16px 24px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        header h1 {
-            font-size: 20px;
-            font-weight: 600;
-            color: #ffffff;
-        }
-
-        header h1 span {
-            color: #6c63ff;
-        }
-
-        .connection-status {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 13px;
-            color: #888;
-        }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #ff4444;
-        }
-
-        .status-dot.connected {
-            background: #44ff88;
-        }
-
-        .dashboard {
-            display: grid;
-            grid-template-columns: 1fr 1fr 280px;
-            gap: 16px;
-            padding: 16px 24px;
-            height: calc(100vh - 65px);
-        }
-
-        .panel {
-            background: #1a1d27;
-            border: 1px solid #2a2d3a;
-            border-radius: 8px;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .panel-header {
-            padding: 12px 16px;
-            border-bottom: 1px solid #2a2d3a;
-            font-size: 14px;
-            font-weight: 600;
-            color: #ffffff;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .panel-body {
-            flex: 1;
-            overflow-y: auto;
-            padding: 12px;
-        }
-
-        /* Live Memory Table */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }
-
-        th {
-            text-align: left;
-            padding: 8px 12px;
-            color: #888;
-            font-weight: 500;
-            border-bottom: 1px solid #2a2d3a;
-            position: sticky;
-            top: 0;
-            background: #1a1d27;
-        }
-
-        td {
-            padding: 8px 12px;
-            border-bottom: 1px solid #1e2130;
-        }
-
-        .status-badge {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .status-ok {
-            background: rgba(68, 255, 136, 0.15);
-            color: #44ff88;
-        }
-
-        .status-conflicted {
-            background: rgba(255, 170, 68, 0.15);
-            color: #ffaa44;
-        }
-
-        .status-flagged {
-            background: rgba(255, 68, 68, 0.15);
-            color: #ff4444;
-        }
-
-        /* Write Log */
-        .log-entry {
-            padding: 8px 12px;
-            border-bottom: 1px solid #1e2130;
-            font-size: 13px;
-        }
-
-        .log-entry .timestamp {
-            color: #555;
-            font-size: 11px;
-            margin-bottom: 2px;
-        }
-
-        .log-entry .action {
-            color: #6c63ff;
-            font-weight: 500;
-        }
-
-        .log-entry .detail {
-            color: #aaa;
-        }
-
-        /* Agent Status */
-        .agent-card {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px;
-            border-bottom: 1px solid #1e2130;
-        }
-
-        .agent-indicator {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
-
-        .agent-indicator.active {
-            background: #44ff88;
-            box-shadow: 0 0 6px rgba(68, 255, 136, 0.4);
-        }
-
-        .agent-indicator.inactive {
-            background: #ff4444;
-            box-shadow: 0 0 6px rgba(255, 68, 68, 0.4);
-        }
-
-        .agent-info {
-            flex: 1;
-        }
-
-        .agent-name {
-            font-size: 13px;
-            font-weight: 600;
-            color: #ffffff;
-        }
-
-        .agent-role {
-            font-size: 11px;
-            color: #888;
-        }
-
-        .agent-writes {
-            font-size: 11px;
-            color: #6c63ff;
-        }
-    </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Engram — Multi-Agent Memory Demo</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Syne:wght@400;600;700;800&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:#0a0a0f;--bg2:#111118;--bg3:#18181f;--bg4:#1e1e28;
+    --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.13);
+    --text:#e8e8f0;--text2:#8888a8;--text3:#55556a;
+    --purple:#8b7df5;--pdim:rgba(139,125,245,0.12);
+    --teal:#2dd4a4;--tdim:rgba(45,212,164,0.12);
+    --coral:#f07060;--cdim:rgba(240,112,96,0.12);
+    --amber:#f0a840;--adim:rgba(240,168,64,0.12);
+    --green:#4dd890;--gdim:rgba(77,216,144,0.1);
+    --fd:'Syne',sans-serif;--fm:'JetBrains Mono',monospace;
+  }
+  html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--fm);font-size:13px;line-height:1.6;overflow-x:hidden;}
+  .shell{display:grid;grid-template-rows:auto auto 1fr;min-height:100vh;}
+  /* HEADER */
+  header{padding:0 2rem;height:56px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);background:var(--bg);position:sticky;top:0;z-index:100;}
+  .logo{display:flex;align-items:center;gap:10px;}
+  .logo-mark{width:28px;height:28px;border-radius:6px;background:linear-gradient(135deg,var(--purple),var(--teal));display:flex;align-items:center;justify-content:center;font-family:var(--fd);font-weight:800;font-size:14px;color:#fff;}
+  .logo-text{font-family:var(--fd);font-weight:700;font-size:18px;letter-spacing:-0.02em;}
+  .logo-sub{font-size:11px;color:var(--text3);margin-left:4px;}
+  .hright{display:flex;align-items:center;gap:10px;}
+  .srv-input{padding:5px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:5px;color:var(--text2);font-family:var(--fm);font-size:11px;width:210px;outline:none;}
+  .srv-input:focus{border-color:var(--purple);color:var(--text);}
+  .conn-btn{padding:5px 14px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);font-family:var(--fm);font-size:11px;cursor:pointer;transition:all .15s;}
+  .conn-btn:hover{border-color:var(--purple);color:var(--purple);}
+  .spill{display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:99px;border:1px solid var(--border2);font-size:11px;color:var(--text2);}
+  .sdot{width:6px;height:6px;border-radius:50%;background:var(--text3);transition:background .3s;}
+  .sdot.live{background:var(--green);animation:pulse 2s infinite;}
+  .sdot.err{background:var(--coral);}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  /* BANNER */
+  .banner{background:var(--bg3);border-bottom:1px solid var(--border);padding:.6rem 2rem;display:flex;align-items:center;gap:1.2rem;font-size:11px;color:var(--text3);flex-wrap:wrap;}
+  .banner.hidden{display:none;}
+  .banner code{background:var(--bg4);padding:2px 6px;border-radius:4px;color:var(--amber);font-family:var(--fm);}
+  .bstep{display:flex;align-items:center;gap:6px;}
+  .bnum{width:18px;height:18px;border-radius:50%;border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;}
+  .bsep{color:var(--border2);}
+  /* MAIN */
+  .main{display:grid;grid-template-columns:240px 1fr 290px;overflow:hidden;height:100%;}
+  /* SIDEBAR */
+  .sidebar{border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;background:var(--bg);}
+  .ss{padding:1rem;border-bottom:1px solid var(--border);}
+  .slabel{font-size:10px;letter-spacing:.1em;color:var(--text3);text-transform:uppercase;margin-bottom:8px;}
+  .sclist{display:flex;flex-direction:column;gap:4px;}
+  .sci{padding:8px 10px;border-radius:6px;cursor:pointer;transition:background .15s;border:1px solid transparent;}
+  .sci:hover{background:var(--bg3);}
+  .sci.active{background:var(--pdim);border-color:rgba(139,125,245,.25);}
+  .sci-t{font-size:12px;font-weight:500;color:var(--text);}
+  .sci-d{font-size:10px;color:var(--text3);margin-top:2px;line-height:1.4;}
+  .stsel{width:100%;padding:6px 8px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-family:var(--fm);font-size:11px;outline:none;cursor:pointer;}
+  .stsel:focus{border-color:var(--purple);}
+  .sgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+  .sbox{background:var(--bg3);border-radius:6px;padding:8px;}
+  .sv{font-size:20px;font-weight:600;color:var(--text);}
+  .sl{font-size:10px;color:var(--text3);}
+  .ci{display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;}
+  .cd{width:6px;height:6px;border-radius:50%;margin-top:5px;flex-shrink:0;}
+  .ct{font-size:10px;color:var(--text3);line-height:1.5;}
+  .ct strong{color:var(--text2);}
+  /* CENTER */
+  .center{display:flex;flex-direction:column;overflow:hidden;background:var(--bg2);}
+  .arow{display:grid;grid-template-columns:1fr 1fr;gap:1px;border-bottom:1px solid var(--border);flex-shrink:0;}
+  .ap{padding:1.25rem;}
+  .ap:first-child{border-right:1px solid var(--border);}
+  .ah{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
+  .av{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;flex-shrink:0;}
+  .avp{background:var(--pdim);color:var(--purple);border:1px solid rgba(139,125,245,.2);}
+  .avt{background:var(--tdim);color:var(--teal);border:1px solid rgba(45,212,164,.2);}
+  .an{font-size:12px;font-weight:500;color:var(--text);}
+  .ar{font-size:10px;color:var(--text3);}
+  .ack{margin-left:auto;font-size:10px;color:var(--text3);}
+  .fr{display:flex;gap:6px;align-items:center;}
+  .fl{font-size:10px;color:var(--text3);width:32px;flex-shrink:0;}
+  .fi{flex:1;padding:6px 8px;background:var(--bg4);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:var(--fm);font-size:11px;outline:none;transition:border-color .15s;}
+  .fi:focus{border-color:var(--purple);}
+  .fr+.fr{margin-top:6px;}
+  .wb{width:100%;margin-top:10px;padding:8px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text);font-family:var(--fm);font-size:11px;font-weight:500;cursor:pointer;transition:all .15s;}
+  .wb:disabled{opacity:.4;cursor:not-allowed;}
+  .wp:not(:disabled):hover{border-color:var(--purple);color:var(--purple);background:var(--pdim);}
+  .wt:not(:disabled):hover{border-color:var(--teal);color:var(--teal);background:var(--tdim);}
+  .wb:active:not(:disabled){transform:scale(.98);}
+  .ring{display:inline-block;width:10px;height:10px;border:1px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .6s linear infinite;margin-right:6px;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  /* MEMORY */
+  .marea{flex:1;overflow-y:auto;padding:1.25rem;}
+  .mhdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+  .mtitle{font-size:10px;letter-spacing:.1em;color:var(--text3);text-transform:uppercase;}
+  .rbtn{font-size:10px;color:var(--text3);background:none;border:none;cursor:pointer;font-family:var(--fm);padding:2px 6px;border-radius:4px;}
+  .rbtn:hover{color:var(--teal);}
+  .mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:8px;}
+  .mc{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;transition:border-color .2s;}
+  .mc.conflict{border-color:rgba(240,112,96,.35);}
+  .mc.flagged{border-color:rgba(240,168,64,.35);}
+  .mc.fresh{animation:fin .5s ease;}
+  @keyframes fin{0%{background:rgba(139,125,245,.2)}100%{background:var(--bg3)}}
+  .mk{font-size:10px;color:var(--text3);margin-bottom:4px;}
+  .mv{font-size:20px;font-weight:600;color:var(--text);margin-bottom:4px;word-break:break-all;}
+  .ma{font-size:9px;color:var(--text3);margin-bottom:2px;}
+  .mcl{font-size:9px;color:var(--text3);word-break:break-all;}
+  .badge{display:inline-block;font-size:9px;padding:2px 6px;border-radius:99px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px;}
+  .bok{background:var(--gdim);color:var(--green);border:1px solid rgba(77,216,144,.2);}
+  .bcf{background:var(--cdim);color:var(--coral);border:1px solid rgba(240,112,96,.2);}
+  .bfl{background:var(--adim);color:var(--amber);border:1px solid rgba(240,168,64,.2);}
+  .bsm{background:var(--pdim);color:var(--purple);border:1px solid rgba(139,125,245,.2);}
+  .cdet{margin-top:6px;padding:6px 8px;background:rgba(240,112,96,.08);border-radius:4px;font-size:9px;color:var(--coral);line-height:1.5;}
+  .empty{text-align:center;padding:3rem;color:var(--text3);font-size:12px;grid-column:1/-1;}
+  /* LOG */
+  .lpane{border-left:1px solid var(--border);background:var(--bg);display:flex;flex-direction:column;overflow:hidden;}
+  .lhdr{padding:1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+  .ltitle{font-size:10px;letter-spacing:.1em;color:var(--text3);text-transform:uppercase;}
+  .cbtn{font-size:10px;color:var(--text3);background:none;border:none;cursor:pointer;font-family:var(--fm);}
+  .cbtn:hover{color:var(--text);}
+  .lentries{flex:1;overflow-y:auto;}
+  .le{padding:8px 1rem;border-bottom:1px solid var(--border);}
+  .lt{font-size:9px;color:var(--text3);margin-bottom:2px;display:flex;align-items:center;gap:6px;}
+  .lsrc{font-size:9px;padding:1px 5px;border-radius:3px;}
+  .slive{background:var(--gdim);color:var(--green);}
+  .ssim{background:var(--pdim);color:var(--purple);}
+  .serr{background:var(--cdim);color:var(--coral);}
+  .lb{font-size:10px;line-height:1.6;color:var(--text2);word-break:break-all;}
+  .ha{color:var(--purple);}.hb{color:var(--teal);}
+  .hk{color:var(--text);}.hv{color:var(--green);}
+  .hco{color:var(--coral);}.hre{color:var(--amber);}
+  .lempty{padding:2rem;text-align:center;font-size:11px;color:var(--text3);}
+  .ht{background:var(--bg4);border-radius:4px;margin-top:4px;padding:5px 8px;font-size:9px;color:var(--text3);}
+  .hm{color:var(--purple);}.hok{color:var(--green);}.her{color:var(--coral);}
+  ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+  @media(max-width:900px){.main{grid-template-columns:200px 1fr;}.lpane{display:none;}}
+</style>
 </head>
 <body>
-    <header>
-        <h1><span>Engram</span> Memory Dashboard</h1>
-        <div class="connection-status">
-            <div class="status-dot" id="ws-status"></div>
-            <span id="ws-label">Disconnected</span>
-        </div>
-    </header>
+<div class="shell">
 
-    <div class="dashboard">
-        <!-- Left Panel: Live Memory -->
-        <div class="panel">
-            <div class="panel-header">Live Memory</div>
-            <div class="panel-body">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Key</th>
-                            <th>Value</th>
-                            <th>Agent</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody id="memory-table">
-                        <tr>
-                            <td>budget</td>
-                            <td>5000</td>
-                            <td>budget-agent-1</td>
-                            <td><span class="status-badge status-ok">OK</span></td>
-                        </tr>
-                        <tr>
-                            <td>flights</td>
-                            <td>["LAX-JFK $320", "LAX-JFK $415"]</td>
-                            <td>flight-agent-1</td>
-                            <td><span class="status-badge status-ok">OK</span></td>
-                        </tr>
-                        <tr>
-                            <td>hotels</td>
-                            <td>["Marriott $180/n", "Hilton $210/n"]</td>
-                            <td>hotel-agent-1</td>
-                            <td><span class="status-badge status-ok">OK</span></td>
-                        </tr>
-                        <tr>
-                            <td>budget</td>
-                            <td>[5000, 3000]</td>
-                            <td>budget-agent-2</td>
-                            <td><span class="status-badge status-conflicted">CONFLICTED</span></td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- Center Panel: Write Log -->
-        <div class="panel">
-            <div class="panel-header">Write Log</div>
-            <div class="panel-body" id="write-log">
-                <div class="log-entry">
-                    <div class="timestamp">14:32:01.123</div>
-                    <div><span class="action">WRITE</span> <span class="detail">budget-agent-1 wrote budget = 5000</span></div>
-                </div>
-                <div class="log-entry">
-                    <div class="timestamp">14:32:01.456</div>
-                    <div><span class="action">WRITE</span> <span class="detail">flight-agent-1 wrote flights = [...]</span></div>
-                </div>
-                <div class="log-entry">
-                    <div class="timestamp">14:32:02.789</div>
-                    <div><span class="action">WRITE</span> <span class="detail">hotel-agent-1 wrote hotels = [...]</span></div>
-                </div>
-                <div class="log-entry">
-                    <div class="timestamp">14:32:03.012</div>
-                    <div><span class="action">CONFLICT</span> <span class="detail">budget-agent-2 wrote budget = 3000 (concurrent with budget-agent-1)</span></div>
-                </div>
-                <div class="log-entry">
-                    <div class="timestamp">14:32:04.345</div>
-                    <div><span class="action">RESOLVE</span> <span class="detail">budget conflict resolved via LATEST_CLOCK -> 5000</span></div>
-                </div>
-                <div class="log-entry">
-                    <div class="timestamp">14:32:05.678</div>
-                    <div><span class="action">DENIED</span> <span class="detail">summarizer-1 attempted write to budget (403 Forbidden)</span></div>
-                </div>
-                <div class="log-entry">
-                    <div class="timestamp">14:32:06.901</div>
-                    <div><span class="action">ROLLBACK</span> <span class="detail">budget-agent-1 rolled back budget to write_id=abc123</span></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Right Panel: Agent Status -->
-        <div class="panel">
-            <div class="panel-header">Agent Status</div>
-            <div class="panel-body" id="agent-status">
-                <div class="agent-card">
-                    <div class="agent-indicator active"></div>
-                    <div class="agent-info">
-                        <div class="agent-name">flight-agent-1</div>
-                        <div class="agent-role">flight-agent</div>
-                        <div class="agent-writes">3 writes</div>
-                    </div>
-                </div>
-                <div class="agent-card">
-                    <div class="agent-indicator active"></div>
-                    <div class="agent-info">
-                        <div class="agent-name">hotel-agent-1</div>
-                        <div class="agent-role">hotel-agent</div>
-                        <div class="agent-writes">2 writes</div>
-                    </div>
-                </div>
-                <div class="agent-card">
-                    <div class="agent-indicator active"></div>
-                    <div class="agent-info">
-                        <div class="agent-name">budget-agent-1</div>
-                        <div class="agent-role">budget-agent</div>
-                        <div class="agent-writes">4 writes</div>
-                    </div>
-                </div>
-                <div class="agent-card">
-                    <div class="agent-indicator inactive"></div>
-                    <div class="agent-info">
-                        <div class="agent-name">summarizer-1</div>
-                        <div class="agent-role">summarizer (read-only)</div>
-                        <div class="agent-writes">0 writes</div>
-                    </div>
-                </div>
-            </div>
-        </div>
+<header>
+  <div class="logo">
+    <div class="logo-mark">E</div>
+    <span class="logo-text">Engram</span>
+    <span class="logo-sub">/ multi-agent memory</span>
+  </div>
+  <div class="hright">
+    <input class="srv-input" id="srv" type="text" value="http://localhost:8000" />
+    <button class="conn-btn" onclick="api.checkHealth()">Connect</button>
+    <div class="spill">
+      <div class="sdot" id="sdot"></div>
+      <span id="stxt">disconnected</span>
     </div>
+  </div>
+</header>
 
-    <script src="app.js"></script>
+<div class="banner" id="banner">
+  <div class="bstep"><div class="bnum">1</div><span>Install: <code>pip install -r requirements.txt</code></span></div>
+  <span class="bsep">│</span>
+  <div class="bstep"><div class="bnum">2</div><span>Add CORS to <code>engram/api.py</code> — see README below</span></div>
+  <span class="bsep">│</span>
+  <div class="bstep"><div class="bnum">3</div><span>Start: <code>uvicorn engram.api:app --reload</code></span></div>
+  <span class="bsep">│</span>
+  <div class="bstep"><div class="bnum">4</div><span>Click <strong style="color:var(--text2)">Connect</strong> ↗ — or use simulation mode below</span></div>
+</div>
+
+<div class="main">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="ss">
+      <div class="slabel">Scenario</div>
+      <div class="sclist" id="sclist"></div>
+    </div>
+    <div class="ss">
+      <div class="slabel">Conflict strategy</div>
+      <select class="stsel" id="stsel" onchange="app.strategy=this.value;updSD()">
+        <option value="latest_clock">latest_clock</option>
+        <option value="highest_value">highest_value</option>
+        <option value="lowest_value">lowest_value</option>
+        <option value="union">union</option>
+        <option value="flag_for_human">flag_for_human</option>
+      </select>
+      <div id="sdesc" style="margin-top:8px;font-size:10px;color:var(--text3);line-height:1.5;"></div>
+    </div>
+    <div class="ss">
+      <div class="slabel">Session stats</div>
+      <div class="sgrid">
+        <div class="sbox"><div class="sv" id="sw" style="color:var(--green)">0</div><div class="sl">writes</div></div>
+        <div class="sbox"><div class="sv" id="scf" style="color:var(--coral)">0</div><div class="sl">conflicts</div></div>
+        <div class="sbox"><div class="sv" id="sk">0</div><div class="sl">keys</div></div>
+        <div class="sbox"><div class="sv" id="sf" style="color:var(--amber)">0</div><div class="sl">flagged</div></div>
+      </div>
+    </div>
+    <div class="ss">
+      <div class="slabel" style="margin-bottom:10px;">Core concepts</div>
+      <div class="ci"><div class="cd" style="background:var(--purple)"></div><div class="ct"><strong>Vector clocks</strong> track causal order. Two writes are concurrent when neither clock dominates.</div></div>
+      <div class="ci"><div class="cd" style="background:var(--teal)"></div><div class="ct"><strong>MVRegister (CRDT)</strong> stores all concurrent values without silently picking a winner.</div></div>
+      <div class="ci"><div class="cd" style="background:var(--coral)"></div><div class="ct"><strong>Conflict resolution</strong> applies your chosen strategy when concurrent writes are detected.</div></div>
+      <div class="ci"><div class="cd" style="background:var(--amber)"></div><div class="ct"><strong>RBAC</strong> enforces role-scoped access per agent before any storage operation.</div></div>
+    </div>
+    <div class="ss">
+      <button onclick="app.reset()" style="width:100%;padding:7px;background:none;border:1px solid var(--border2);border-radius:6px;color:var(--text3);font-family:var(--fm);font-size:11px;cursor:pointer;" onmouseover="this.style.color='var(--coral)';this.style.borderColor='var(--coral)'" onmouseout="this.style.color='var(--text3)';this.style.borderColor='var(--border2)'">Reset local state</button>
+    </div>
+  </div>
+
+  <!-- CENTER -->
+  <div class="center">
+    <div style="padding:8px 1.25rem;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0;">
+      <button onclick="api.triggerConflict()" style="padding:6px 16px;border-radius:6px;border:1px solid var(--coral);background:var(--cdim);color:var(--coral);font-family:var(--fm);font-size:11px;font-weight:600;cursor:pointer;" onmouseover="this.style.background='rgba(240,112,96,0.25)'" onmouseout="this.style.background='var(--cdim)'">
+        ⚡ Trigger Conflict
+      </button>
+      <span style="font-size:10px;color:var(--text3);">Fires both agents simultaneously via Promise.all — guaranteed concurrent write</span>
+    </div>
+    <div class="arow">
+      <div class="ap" id="pa"></div>
+      <div class="ap" id="pb"></div>
+    </div>
+    <div class="marea">
+      <div class="mhdr">
+        <span class="mtitle">Shared memory store — Engram / InMemoryAdapter</span>
+        <button class="rbtn" onclick="api.refreshMemory()">↻ refresh from server</button>
+      </div>
+      <div id="mgrid" class="mgrid">
+        <div class="empty"><div style="font-size:28px;opacity:.3;margin-bottom:8px;">◈</div>No keys written yet.<br>Use the agent panels above.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOG -->
+  <div class="lpane">
+    <div class="lhdr">
+      <span class="ltitle">HTTP trace / event log</span>
+      <button class="cbtn" onclick="app.log=[];app.renderLog()">clear</button>
+    </div>
+    <div class="lentries" id="lentries"><div class="lempty">HTTP requests and events appear here...</div></div>
+    <div style="border-top:1px solid var(--border);padding:.75rem 1rem;font-size:10px;color:var(--text3);line-height:1.6;">
+      Pipeline: permission check → clock increment → conflict detection → CRDT resolution → history append → storage write.
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+const SC = {
+  budget:{label:'Budget negotiation',desc:'Two finance agents manage overlapping budget keys.',
+    A:{id:'budget-agent-A',role:'admin',dk:'budget.q3',dv:'85000'},
+    B:{id:'budget-agent-B',role:'admin',dk:'budget.q3',dv:'72000'},
+    keys:['budget.q3','budget.q4','budget.total','headcount']},
+  inventory:{label:'Inventory sync',desc:'Warehouse and shipping agents update stock simultaneously.',
+    A:{id:'warehouse-agent',role:'admin',dk:'stock.SKU-001',dv:'450'},
+    B:{id:'shipping-agent',role:'admin',dk:'stock.SKU-001',dv:'380'},
+    keys:['stock.SKU-001','stock.SKU-002','orders.pending','stock.total']},
+  planning:{label:'Task planning',desc:'Planner and executor race to update task status.',
+    A:{id:'planner-agent',role:'admin',dk:'task.priority',dv:'high'},
+    B:{id:'executor-agent',role:'admin',dk:'task.priority',dv:'critical'},
+    keys:['task.priority','task.status','task.owner','task.deadline']},
+  freeplay:{label:'Free play',desc:'Type any key/value, trigger conflicts manually.',
+    A:{id:'agent-alpha',role:'admin',dk:'shared.value',dv:'100'},
+    B:{id:'agent-beta',role:'admin',dk:'shared.value',dv:'200'},
+    keys:[]}
+};
+const SD={latest_clock:'Picks the value with the highest vector clock sum. Tie-break by timestamp.',highest_value:'Picks the numerically largest value.',lowest_value:'Picks the numerically smallest value.',union:'Keeps all concurrent values as a list — nothing discarded.',flag_for_human:'Does not resolve. Marks the entry FLAGGED for manual review.'};
+
+/* ── API ── */
+const api={
+  base(){return document.getElementById('srv').value.replace(/\/$/,'');},
+  async checkHealth(){
+    const url=this.base()+'/health';
+    app.addLog('S',`<span class="hk">GET ${url}</span>`,'live');
+    try{
+      const r=await fetch(url);
+      const d=await r.json();
+      app.setConn(true);
+      app.addLog('S',`<div class="ht"><span class="hm">GET</span> /health → <span class="hok">${r.status} OK</span> storage:${d.storage||'memory'}</div>`,'live');
+      await this.seedRoles();
+      await this.refreshMemory();
+    }catch(e){
+      app.setConn(false);
+      app.addLog('S',`<span class="hco">Failed: ${e.message} — is the server running? Did you add CORS?</span>`,'err');
+    }
+  },
+  async seedRoles(){
+    const b=this.base();
+    const roles=[
+      {role_name:'admin',can_read:['*'],can_write:['*']},
+      {role_name:'budget-agent',can_read:['budget.*','headcount'],can_write:['budget.*','headcount']},
+      {role_name:'inventory',can_read:['stock.*','orders.*'],can_write:['stock.*','orders.*']},
+      {role_name:'planner',can_read:['task.*'],can_write:['task.*']},
+      {role_name:'executor',can_read:['task.*'],can_write:['task.*']}
+    ];
+    for(const r of roles){
+      try{await fetch(b+'/roles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(r)});}catch(_){}
+    }
+    app.addLog('S','<span class="hk">Seeded roles: admin, budget-agent, inventory, planner, executor</span>','live');
+  },
+  async write(L,key,value){
+    if(!key||!value)return;
+    const sc=SC[app.scenario];
+    const cf=L==='A'?sc.A:sc.B;
+    app.clocks[L]++;
+    const clock={[cf.id]:app.clocks[L]};
+    // Send own clock only — agent has no knowledge of other agents
+    const ownClock={[cf.id]:app.clocks[L]-1};
+    const payload={key,value,agent_id:cf.id,role:cf.role,consistency_level:'eventual',conflict_strategy:app.strategy,vector_clock:ownClock};
+    if(!app.connected){app.simWrite(L,key,value,clock,cf);return;}
+    setBL(L,true);
+    app.addLog(L,`<span class="${L==='A'?'ha':'hb'}">[${cf.id}]</span> POST /write <span class="hk">${key}</span>=<span class="hv">${value}</span>`,'live');
+    try{
+      const r=await fetch(this.base()+'/write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const d=await r.json();
+      setBL(L,false);
+      app.stats.writes++;
+      if(!r.ok){app.addLog(L,`<div class="ht"><span class="her">${r.status}</span> ${JSON.stringify(d).slice(0,100)}</div>`,'err');app.renderStats();return;}
+      const isCf=d.status==='conflict'||d.conflict===true;
+      const isFl=d.status==='flagged';
+      if(isCf)app.stats.conflicts++;
+      if(isFl)app.stats.flagged++;
+      const rv=d.resolved_value??d.value??value;
+      app.addLog(L,`<div class="ht"><span class="hok">${r.status}</span> → ${isCf?'<span class="hco">CONFLICT</span>':isFl?'<span class="hre">FLAGGED</span>':'<span class="hok">OK</span>'} resolved=${rv}</div>`,'live');
+      app.memory[key]={value:rv,clock:d.vector_clock??clock,agent:cf.id,status:d.status??(isCf?'conflict':'ok'),ci:isCf?`server: ${d.conflict_values?.[0]??'?'} vs ${d.conflict_values?.[1]??'?'} → ${rv}`:null,fresh:true};
+      setTimeout(()=>{if(app.memory[key])app.memory[key].fresh=false;},500);
+      app.renderAll();
+    }catch(e){setBL(L,false);app.addLog(L,`<span class="hco">fetch error: ${e.message}</span>`,'err');}
+  },
+  async triggerConflict(){
+    // Fire both agents at exactly the same time — guaranteed concurrent
+    const sc=SC[app.scenario];
+    const cfA=sc.A, cfB=sc.B;
+    const keyA=document.getElementById('ki-A')?.value||cfA.dk;
+    const keyB=document.getElementById('ki-B')?.value||cfB.dk;
+    const valA=document.getElementById('vi-A')?.value||cfA.dv;
+    const valB=document.getElementById('vi-B')?.value||cfB.dv;
+    app.clocks.A++; app.clocks.B++;
+    const clockA={[cfA.id]:app.clocks.A-1};
+    const clockB={[cfB.id]:app.clocks.B-1};
+    const payloadA={key:keyA,value:valA,agent_id:cfA.id,role:cfA.role,consistency_level:'eventual',conflict_strategy:app.strategy,vector_clock:clockA};
+    const payloadB={key:keyB,value:valB,agent_id:cfB.id,role:cfB.role,consistency_level:'eventual',conflict_strategy:app.strategy,vector_clock:clockB};
+    app.addLog('S','<span style="color:var(--coral)">⚡ Firing both agents simultaneously...</span>','live');
+    const base=this.base();
+    try {
+      const [rA,rB]=await Promise.all([
+        fetch(base+'/write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payloadA)}),
+        fetch(base+'/write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payloadB)})
+      ]);
+      const [dA,dB]=await Promise.all([rA.json(),rB.json()]);
+      app.stats.writes+=2;
+      const isCfA=dA.status==='conflict'||dA.status==='conflicted';
+      const isCfB=dB.status==='conflict'||dB.status==='conflicted';
+      if(isCfA||isCfB)app.stats.conflicts++;
+      const rvA=dA.resolved_value??dA.value??valA;
+      const rvB=dB.resolved_value??dB.value??valB;
+      app.addLog('A',`<div class="ht"><span class="hok">${rA.status}</span> [${cfA.id}] ${keyA}=${valA} → ${isCfA?'<span class="hco">CONFLICT</span>':'<span class="hok">OK</span>'} resolved=${rvA}</div>`,'live');
+      app.addLog('B',`<div class="ht"><span class="hok">${rB.status}</span> [${cfB.id}] ${keyB}=${valB} → ${isCfB?'<span class="hco">CONFLICT</span>':'<span class="hok">OK</span>'} resolved=${rvB}</div>`,'live');
+      app.memory[keyA]={value:rvA,clock:dA.vector_clock??clockA,agent:cfA.id,status:dA.status??'ok',ci:isCfA?`${valA} vs ${valB} → ${rvA}`:null,fresh:true};
+      if(keyA!==keyB) app.memory[keyB]={value:rvB,clock:dB.vector_clock??clockB,agent:cfB.id,status:dB.status??'ok',ci:null,fresh:true};
+      setTimeout(()=>{if(app.memory[keyA])app.memory[keyA].fresh=false;},500);
+      app.renderAll();
+    } catch(e){app.addLog('S',`<span class="hco">conflict trigger error: ${e.message}</span>`,'err');}
+  },
+  async refreshMemory(){
+    if(!app.connected)return;
+    try{
+      const r=await fetch(this.base()+'/keys');
+      if(!r.ok)return;
+      const d=await r.json();
+      const keys=Array.isArray(d)?d:(d.keys||[]);
+      app.addLog('S',`<span class="hk">GET /keys → ${keys.length} key(s)</span>`,'live');
+      for(const k of keys){
+        try{
+          const r2=await fetch(this.base()+`/read/${k}?agent_id=demo-ui&role=admin`);
+          if(r2.ok){const d2=await r2.json();app.memory[k]={value:d2.value,clock:d2.vector_clock??{},agent:d2.agent_id??'?',status:d2.status??'ok',ci:null,fresh:false};}
+        }catch(_){}
+      }
+      app.renderAll();
+    }catch(e){app.addLog('S',`<span class="hco">refresh: ${e.message}</span>`,'err');}
+  }
+};
+
+/* ── SIM ── */
+function cmpClk(a,b){const all=[...new Set([...Object.keys(a),...Object.keys(b)])];let al=true,bl=true;for(const k of all){const va=a[k]||0,vb=b[k]||0;if(va>vb)bl=false;if(vb>va)al=false;}if(al&&bl)return'equal';if(al)return'before';if(bl)return'after';return'concurrent';}
+function clkSum(c){return Object.values(c).reduce((a,b)=>a+b,0);}
+
+/* ── APP ── */
+const app={
+  memory:{},clocks:{A:0,B:0},log:[],stats:{writes:0,conflicts:0,flagged:0},
+  scenario:'budget',strategy:'latest_clock',connected:false,
+
+  setConn(v){
+    this.connected=v;
+    document.getElementById('sdot').className='sdot '+(v?'live':'err');
+    document.getElementById('stxt').textContent=v?'live — '+api.base():'simulation mode (server offline)';
+    document.getElementById('banner').classList.toggle('hidden',v);
+  },
+
+  simWrite(L,key,value,clock,cf){
+    const ex=this.memory[key];let status='ok',rv=value,ci=null;
+    if(ex){
+      const rel=cmpClk(clock,ex.clock);
+      if(rel==='concurrent'){
+        const s=this.strategy;let res;
+        if(s==='latest_clock')res=clkSum(clock)>=clkSum(ex.clock)?value:ex.value;
+        else if(s==='highest_value')res=String(Math.max(parseFloat(ex.value)||0,parseFloat(value)||0));
+        else if(s==='lowest_value')res=String(Math.min(parseFloat(ex.value)||0,parseFloat(value)||0));
+        else if(s==='union')res=`[${ex.value}, ${value}]`;
+        else res=null;
+        if(res===null){status='flagged';rv=ex.value;this.stats.flagged++;ci=`Concurrent: ${ex.value} vs ${value} → FLAGGED`;}
+        else{status='conflict';rv=res;this.stats.conflicts++;ci=`Concurrent: ${ex.value} vs ${value} → ${rv} (${s})`;}
+      }
+    }
+    const mc={...(ex?ex.clock:{}), ...clock};
+    this.memory[key]={value:rv,clock:mc,agent:cf.id,status,ci,fresh:true};
+    this.stats.writes++;
+    const isA=L==='A';
+    let body=`<span class="${isA?'ha':'hb'}">[${cf.id}]</span> SIM WRITE <span class="hk">${key}</span>=<span class="hv">${value}</span> `;
+    if(status==='conflict')body+=`<span class="hco">CONFLICT</span> <span class="hre">→ ${rv}</span>`;
+    else if(status==='flagged')body+=`<span class="hre">FLAGGED</span>`;
+    else body+=`<span class="hok">OK</span>`;
+    this.addLog(L,body,'sim');
+    setTimeout(()=>{if(this.memory[key])this.memory[key].fresh=false;},500);
+    this.renderAll();
+  },
+
+  addLog(who,body,src){
+    const now=new Date().toLocaleTimeString('en',{hour12:false});
+    const sl=src==='live'?'<span class="lsrc slive">LIVE</span>':src==='sim'?'<span class="lsrc ssim">SIM</span>':'<span class="lsrc serr">ERR</span>';
+    this.log.unshift({t:now,body,sl});this.renderLog();
+  },
+
+  reset(){this.memory={};this.clocks={A:0,B:0};this.log=[];this.stats={writes:0,conflicts:0,flagged:0};this.renderAll();},
+
+  loadSC(name){
+    this.scenario=name;this.memory={};this.clocks={A:0,B:0};this.log=[];this.stats={writes:0,conflicts:0,flagged:0};
+    document.querySelectorAll('.sci').forEach(el=>el.classList.toggle('active',el.dataset.n===name));
+    this.renderAll();
+  },
+
+  renderPane(L){
+    const sc=SC[this.scenario];const cf=L==='A'?sc.A:sc.B;const isA=L==='A';
+    const ki=`ki-${L}`,vi=`vi-${L}`;
+    const keyEl=sc.keys.length?`<select id="${ki}" class="fi" style="flex:1">${sc.keys.map(k=>`<option value="${k}"${k===cf.dk?' selected':''}>${k}</option>`).join('')}</select>`:`<input id="${ki}" class="fi" type="text" value="${cf.dk}" placeholder="key.name" style="flex:1"/>`;
+    document.getElementById(`p${L.toLowerCase()}`).innerHTML=`
+      <div class="ah">
+        <div class="av ${isA?'avp':'avt'}">${L}</div>
+        <div><div class="an">${cf.id}</div><div class="ar">role: ${cf.role}</div></div>
+        <div class="ack">clock: ${this.clocks[L]}</div>
+      </div>
+      <div class="fr"><span class="fl">key</span>${keyEl}</div>
+      <div class="fr"><span class="fl">val</span><input id="${vi}" class="fi" type="text" value="${cf.dv}" placeholder="value" style="flex:1"/></div>
+      <button id="btn-${L}" class="wb ${isA?'wp':'wt'}" onclick="api.write('${L}',document.getElementById('ki-${L}').value.trim(),document.getElementById('vi-${L}').value.trim())">
+        POST /write → ${cf.id}
+      </button>`;
+  },
+
+  renderMemory(){
+    const el=document.getElementById('mgrid');const keys=Object.keys(this.memory);
+    if(!keys.length){el.innerHTML='<div class="empty"><div style="font-size:28px;opacity:.3;margin-bottom:8px;">◈</div>No keys written yet.<br>Use the agent panels above.</div>';return;}
+    el.innerHTML=keys.map(k=>{
+      const m=this.memory[k];
+      const b=m.status==='conflict'?'<span class="badge bcf">conflict</span>':m.status==='flagged'?'<span class="badge bfl">flagged</span>':this.connected?'<span class="badge bok">ok</span>':'<span class="badge bsm">simulated</span>';
+      const cl=Object.entries(m.clock).map(([a,v])=>`${a.split('-').pop()}:${v}`).join(', ');
+      return`<div class="mc ${m.status||''} ${m.fresh?'fresh':''}">
+        ${b}<div class="mk">${k}</div>
+        <div class="mv">${m.value}</div>
+        <div class="ma">${m.agent||''}</div>
+        <div class="mcl">{ ${cl} }</div>
+        ${m.ci?`<div class="cdet">${m.ci}</div>`:''}
+      </div>`;
+    }).join('');
+  },
+
+  renderLog(){
+    const el=document.getElementById('lentries');
+    if(!this.log.length){el.innerHTML='<div class="lempty">HTTP requests and events appear here...</div>';return;}
+    el.innerHTML=this.log.slice(0,80).map(e=>`<div class="le"><div class="lt">${e.t} ${e.sl}</div><div class="lb">${e.body}</div></div>`).join('');
+  },
+
+  renderStats(){
+    document.getElementById('sw').textContent=this.stats.writes;
+    document.getElementById('scf').textContent=this.stats.conflicts;
+    document.getElementById('sk').textContent=Object.keys(this.memory).length;
+    document.getElementById('sf').textContent=this.stats.flagged;
+  },
+
+  renderAll(){this.renderPane('A');this.renderPane('B');this.renderMemory();this.renderLog();this.renderStats();}
+};
+
+function setBL(L,on){
+  const btn=document.getElementById(`btn-${L}`);if(!btn)return;
+  btn.disabled=on;
+  btn.innerHTML=on?`<span class="ring"></span>writing...`:`POST /write → ${SC[app.scenario][L==='A'?'A':'B'].id}`;
+}
+function updSD(){document.getElementById('sdesc').textContent=SD[app.strategy]||'';}
+
+// init
+document.getElementById('sclist').innerHTML=Object.entries(SC).map(([k,s])=>`
+  <div class="sci ${k===app.scenario?'active':''}" data-n="${k}" onclick="app.loadSC('${k}')">
+    <div class="sci-t">${s.label}</div>
+    <div class="sci-d">${s.desc}</div>
+  </div>`).join('');
+updSD();app.renderAll();app.setConn(false);
+</script>
 </body>
 </html>

@@ -62,6 +62,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def get_middleware(request: Request) -> EngramMiddleware:
     """Dependency that retrieves the EngramMiddleware from app.state."""
