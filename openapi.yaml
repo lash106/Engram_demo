@@ -1,0 +1,1043 @@
+openapi: 3.0.3
+info:
+  title: Engram API
+  description: |
+    Memory middleware for multi-agent AI systems.
+
+    Engram sits between your AI agents and shared state, providing conflict detection, 
+    causal ordering, access control, and a full audit trail — so multiple agents can 
+    read and write to the same memory without silently overwriting each other.
+
+    ## Core Features
+    - **Conflict Detection**: Uses vector clocks to detect concurrent writes
+    - **CRDT Storage**: Multi-Value Register stores all conflicting values
+    - **Conflict Resolution**: Configurable strategies (latest_clock, highest_value, lowest_value, union, flag_for_human)
+    - **Role-Based Access Control**: Fine-grained permissions with fnmatch patterns
+    - **Immutable Audit Trail**: Complete history with time-travel queries
+    - **Storage Agnostic**: Pluggable adapters (memory, Redis, future: Chroma, Pinecone)
+
+    ## Authentication
+    Currently, Engram uses role-based access control at the API level. All write and read 
+    operations require `agent_id` and `role` parameters which are validated against 
+    registered role definitions.
+
+    ## Quick Start
+    1. Register a role: `POST /roles`
+    2. Write a value: `POST /write`
+    3. Read a value: `GET /read/{key}`
+    4. Query history: `GET /history/{key}`
+  version: 0.1.0
+  contact:
+    name: Engram Support
+    url: https://github.com/lash106/Engram
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+    variables:
+      host:
+        default: localhost
+      port:
+        default: "8000"
+  - url: http://{host}:{port}
+    description: Custom server
+    variables:
+      host:
+        default: localhost
+        description: Server hostname or IP
+      port:
+        default: "8000"
+        description: Server port
+
+tags:
+  - name: Memory Operations
+    description: Read and write shared memory with conflict detection
+  - name: History & Audit
+    description: Query write history and perform time-travel snapshots
+  - name: Role Management
+    description: Define and manage role-based access control
+  - name: System
+    description: System health and diagnostics
+
+paths:
+  /write:
+    post:
+      tags:
+        - Memory Operations
+      summary: Write a value to shared memory
+      description: |
+        Write a value to shared memory with conflict detection and resolution.
+
+        The full write pipeline includes:
+        1. Permission check (AccessPolicy)
+        2. Vector clock increment
+        3. Conflict detection (compare with existing clock)
+        4. Conflict resolution (apply strategy if concurrent)
+        5. History logging (immutable audit trail)
+        6. Persistence (storage adapter)
+
+        **Permission Requirements**: The `role` must have write permission for the key.
+      operationId: write_memory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WriteRequest"
+            examples:
+              simple_write:
+                summary: Simple write with admin role
+                value:
+                  key: budget
+                  value: 5000
+                  agent_id: agent_a
+                  role: admin
+                  vector_clock: { "agent_a": 1 }
+              with_consistency:
+                summary: Write with explicit consistency level and strategy
+                value:
+                  key: budget
+                  value: 5000
+                  agent_id: budget-agent-1
+                  role: budget-agent
+                  consistency_level: eventual
+                  conflict_strategy: latest_clock
+                  vector_clock: { "budget-agent-1": 1, "budget-agent-2": 0 }
+      responses:
+        200:
+          description: Write successful. Returns the resolved MemoryEntry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryEntry"
+              examples:
+                ok_status:
+                  summary: No conflict
+                  value:
+                    write_id: 550e8400-e29b-41d4-a716-446655440000
+                    key: budget
+                    value: 5000
+                    agent_id: agent_a
+                    role: admin
+                    vector_clock: { "agent_a": 1 }
+                    consistency_level: eventual
+                    conflict_strategy: latest_clock
+                    status: ok
+                    conflicting_writes: []
+                    timestamp: "2026-05-05T10:30:00Z"
+                conflicted_status:
+                  summary: Conflict detected and stored
+                  value:
+                    write_id: 550e8400-e29b-41d4-a716-446655440001
+                    key: budget
+                    value: 5000
+                    agent_id: agent_a
+                    role: admin
+                    vector_clock: { "agent_a": 1 }
+                    consistency_level: eventual
+                    conflict_strategy: latest_clock
+                    status: conflicted
+                    conflicting_writes:
+                      - write_id: 550e8400-e29b-41d4-a716-446655440002
+                        agent_id: agent_b
+                        role: admin
+                        value: 4200
+                        vector_clock: { "agent_b": 1 }
+                        timestamp: "2026-05-05T10:29:00Z"
+                    timestamp: "2026-05-05T10:30:00Z"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        403:
+          $ref: "#/components/responses/Forbidden"
+        422:
+          $ref: "#/components/responses/UnprocessableEntity"
+        500:
+          $ref: "#/components/responses/InternalServerError"
+
+  /read/{key}:
+    get:
+      tags:
+        - Memory Operations
+      summary: Read a value from shared memory
+      description: |
+        Read the current value of a memory key.
+
+        The read pipeline includes:
+        1. Permission check (agent must have read permission)
+        2. Storage lookup
+        3. Consistency level enforcement (EVENTUAL: immediate, CAUSAL/STRONG: not yet implemented)
+
+        **Permission Requirements**: The `role` must have read permission for the key.
+
+        **Consistency Levels**:
+        - `eventual` (default): Returns immediately, may be stale
+        - `causal`: (not yet implemented) Ensures causal consistency
+        - `strong`: (not yet implemented) Full consistency via quorum
+      operationId: read_memory
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: The memory key to read
+          schema:
+            type: string
+            example: budget
+        - name: agent_id
+          in: query
+          required: true
+          description: The ID of the agent performing the read
+          schema:
+            type: string
+            example: agent_a
+        - name: role
+          in: query
+          required: true
+          description: The role of the agent (used for access control)
+          schema:
+            type: string
+            example: admin
+        - name: consistency_level
+          in: query
+          required: false
+          description: Consistency level for the read
+          schema:
+            $ref: "#/components/schemas/ConsistencyLevel"
+            default: eventual
+      responses:
+        200:
+          description: Read successful. Returns the current MemoryEntry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryEntry"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        403:
+          $ref: "#/components/responses/Forbidden"
+        404:
+          description: Key not found in memory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail: "Key 'nonexistent' not found"
+        422:
+          $ref: "#/components/responses/UnprocessableEntity"
+        500:
+          $ref: "#/components/responses/InternalServerError"
+
+  /history/{key}:
+    get:
+      tags:
+        - History & Audit
+      summary: Get write history for a key
+      description: |
+        Query the immutable history log for all writes to a given key.
+
+        Returns all HistoryEntry records in chronological order (oldest first), 
+        with optional filters for agent_id and timestamp range.
+
+        **Use Cases**:
+        - Audit trail: See all writes to a key with full traceability
+        - Debugging: Understand the sequence of writes and conflicts
+        - Compliance: Complete record keeping for audits
+      operationId: get_history
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: The memory key to get history for
+          schema:
+            type: string
+            example: budget
+        - name: agent_id
+          in: query
+          required: false
+          description: Filter history by agent ID
+          schema:
+            type: string
+            example: agent_a
+        - name: since
+          in: query
+          required: false
+          description: ISO 8601 timestamp - only return entries after this time
+          schema:
+            type: string
+            format: date-time
+            example: "2026-05-05T10:00:00Z"
+        - name: until
+          in: query
+          required: false
+          description: ISO 8601 timestamp - only return entries before this time
+          schema:
+            type: string
+            format: date-time
+            example: "2026-05-05T11:00:00Z"
+      responses:
+        200:
+          description: History retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HistoryEntry"
+              examples:
+                simple_history:
+                  summary: Two sequential writes
+                  value:
+                    - write_id: 550e8400-e29b-41d4-a716-446655440000
+                      key: budget
+                      value: 5000
+                      agent_id: agent_a
+                      role: admin
+                      vector_clock: { "agent_a": 1 }
+                      timestamp: "2026-05-05T10:00:00Z"
+                      write_type: write
+                      rollback_of: null
+                    - write_id: 550e8400-e29b-41d4-a716-446655440001
+                      key: budget
+                      value: 4200
+                      agent_id: agent_b
+                      role: admin
+                      vector_clock: { "agent_b": 1 }
+                      timestamp: "2026-05-05T10:01:00Z"
+                      write_type: write
+                      rollback_of: null
+        400:
+          $ref: "#/components/responses/BadRequest"
+        422:
+          $ref: "#/components/responses/UnprocessableEntity"
+        500:
+          $ref: "#/components/responses/InternalServerError"
+
+  /snapshot/{key}:
+    get:
+      tags:
+        - History & Audit
+      summary: Time-travel query - get key value at a specific point in causal time
+      description: |
+        Query the value of a key at a specific point in causal time using vector clocks.
+
+        This implements "time-travel" by returning the most recent write that causally 
+        precedes the given clock point.
+
+        **Example**:
+        - Agent A writes: value=100, clock={"A":1,"B":0} at time T1
+        - Agent B writes: value=200, clock={"A":0,"B":1} at time T2 (concurrent)
+        - Query at clock {"A":1,"B":0} returns: value=100 (A's write at that time)
+
+        **Use Cases**:
+        - Debugging: Understand what agents "saw" at different points
+        - Reproducibility: Recreate system state at any causal point
+        - Forensics: Investigate conflicts and their causes
+      operationId: get_snapshot
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: The memory key to snapshot
+          schema:
+            type: string
+            example: budget
+        - name: at_clock
+          in: query
+          required: true
+          description: JSON-encoded vector clock dict (agent_id -> counter)
+          schema:
+            type: string
+            example: '{"agent_a":1,"agent_b":0}'
+      responses:
+        200:
+          description: Snapshot found and returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryEntry"
+              example:
+                write_id: 550e8400-e29b-41d4-a716-446655440000
+                key: budget
+                value: 5000
+                agent_id: agent_a
+                role: admin
+                vector_clock: { "agent_a": 1 }
+                timestamp: "2026-05-05T10:00:00Z"
+                write_type: write
+                rollback_of: null
+        400:
+          description: Invalid clock format (not valid JSON)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        404:
+          description: No snapshot found for the given key and clock
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail: "No snapshot found for key 'budget' at the given clock"
+        422:
+          $ref: "#/components/responses/UnprocessableEntity"
+        500:
+          $ref: "#/components/responses/InternalServerError"
+
+  /rollback/{write_id}:
+    post:
+      tags:
+        - Memory Operations
+      summary: Roll back a previous write
+      description: |
+        Undo a previous write by creating a new history entry of type ROLLBACK.
+
+        **How it works**:
+        1. Finds the original write by write_id
+        2. Creates a new HistoryEntry with type=ROLLBACK
+        3. The new entry points back to the original via rollback_of
+        4. Updates the live memory to the original value
+        5. Nothing is deleted - full audit trail is preserved
+
+        **Permission Requirements**: The initiating agent's role must have write permission 
+        for the key.
+
+        **Immutability Note**: Rollbacks don't delete - they create new entries. The original 
+        write remains in history. This ensures a complete audit trail.
+      operationId: rollback
+      parameters:
+        - name: write_id
+          in: path
+          required: true
+          description: The write_id of the entry to roll back
+          schema:
+            type: string
+            format: uuid
+            example: 550e8400-e29b-41d4-a716-446655440000
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RollbackRequest"
+            example:
+              initiating_agent_id: admin_agent
+              initiating_role: admin
+      responses:
+        200:
+          description: Rollback successful. Returns the updated MemoryEntry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryEntry"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        403:
+          $ref: "#/components/responses/Forbidden"
+        404:
+          description: Write ID not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail: "Write ID 'invalid-uuid' not found"
+        422:
+          $ref: "#/components/responses/UnprocessableEntity"
+        500:
+          $ref: "#/components/responses/InternalServerError"
+
+  /roles:
+    post:
+      tags:
+        - Role Management
+      summary: Register or update a role definition
+      description: |
+        Create or update a role definition with read/write permissions.
+
+        Permissions are specified as glob patterns using fnmatch syntax:
+        - `*` - matches all keys
+        - `budget.*` - matches keys starting with "budget." (e.g., budget.flights, budget.hotels)
+        - `transaction_*` - matches keys starting with "transaction_"
+        - Specific keys: `audit.log` - matches exactly "audit.log"
+
+        **Role Hierarchy**:
+        - `admin`: can_read=["*"], can_write=["*"] - full access
+        - `budget-agent`: can_read=["budget.*"], can_write=["budget.*"] - scoped access
+        - `auditor`: can_read=["*"], can_write=[] - read-only
+
+        **Idempotent**: If a role already exists, it will be updated with the new permissions.
+      operationId: register_role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoleDefinition"
+            examples:
+              admin_role:
+                summary: Admin role with full access
+                value:
+                  role_name: admin
+                  can_read: ["*"]
+                  can_write: ["*"]
+              budget_agent:
+                summary: Budget agent with scoped access
+                value:
+                  role_name: budget-agent
+                  can_read: ["budget.*"]
+                  can_write: ["budget.*"]
+              auditor_role:
+                summary: Auditor with read-only access
+                value:
+                  role_name: auditor
+                  can_read: ["*"]
+                  can_write: []
+      responses:
+        200:
+          description: Role registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleDefinition"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        422:
+          $ref: "#/components/responses/UnprocessableEntity"
+        500:
+          $ref: "#/components/responses/InternalServerError"
+
+  /roles/{role_name}:
+    get:
+      tags:
+        - Role Management
+      summary: Get a role definition by name
+      description: Retrieve the permissions for a specific role.
+      operationId: get_role
+      parameters:
+        - name: role_name
+          in: path
+          required: true
+          description: The name of the role to retrieve
+          schema:
+            type: string
+            example: admin
+      responses:
+        200:
+          description: Role definition retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleDefinition"
+        404:
+          description: Role not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail: "Role 'unknown-role' not found"
+        422:
+          $ref: "#/components/responses/UnprocessableEntity"
+        500:
+          $ref: "#/components/responses/InternalServerError"
+
+  /keys:
+    get:
+      tags:
+        - System
+      summary: List all keys in storage
+      description: |
+        Retrieve a list of all keys currently stored in memory.
+
+        Optionally filter by prefix to get only keys starting with a specific string.
+
+        **Use Cases**:
+        - Discovery: See what keys are available
+        - Management: Understand memory usage
+        - Debugging: Verify expected keys exist
+      operationId: list_keys
+      parameters:
+        - name: prefix
+          in: query
+          required: false
+          description: Filter keys by prefix (e.g., "budget." to get all budget-related keys)
+          schema:
+            type: string
+            example: budget
+      responses:
+        200:
+          description: List of keys retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              examples:
+                all_keys:
+                  summary: All keys in memory
+                  value:
+                    - budget
+                    - budget.flights
+                    - budget.hotels
+                    - transaction.log
+                    - user.preferences
+                filtered_keys:
+                  summary: Keys filtered by prefix
+                  value:
+                    - budget
+                    - budget.flights
+                    - budget.hotels
+        500:
+          $ref: "#/components/responses/InternalServerError"
+
+  /health:
+    get:
+      tags:
+        - System
+      summary: Health check endpoint
+      description: |
+        Check the health status of the Engram service.
+
+        Returns the current status and storage backend information.
+
+        **Use Cases**:
+        - Monitoring: Verify service is running
+        - Load balancers: Determine if instance is ready for traffic
+        - Readiness probes: Kubernetes and other orchestration platforms
+      operationId: health_check
+      responses:
+        200:
+          description: Service is healthy or degraded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              examples:
+                healthy:
+                  summary: Service is healthy
+                  value:
+                    status: healthy
+                    storage: memory
+                    version: "0.1.0"
+                degraded:
+                  summary: Service is degraded (storage unavailable)
+                  value:
+                    status: degraded
+                    storage: redis
+                    version: "0.1.0"
+        500:
+          $ref: "#/components/responses/InternalServerError"
+
+  /ws/memory:
+    get:
+      tags:
+        - Memory Operations
+      summary: WebSocket endpoint for real-time memory updates
+      description: |
+        **NOT YET IMPLEMENTED**
+
+        WebSocket endpoint for streaming real-time memory state updates to connected clients.
+
+        Planned behavior:
+        - On each write, broadcast the updated MemoryEntry to all connected clients
+        - Clients can subscribe to specific keys or all changes
+        - Useful for reactive UI updates or real-time dashboards
+
+        Current status: Accepts connection, sends status message, then closes.
+
+        **Future Implementation**:
+        - Connection manager for handling multiple clients
+        - Message filtering (subscribe to specific keys)
+        - Reconnection handling and message replay
+      operationId: websocket_memory
+      responses:
+        101:
+          description: WebSocket connection upgrade
+        400:
+          description: Invalid WebSocket upgrade request
+        500:
+          description: Internal server error
+
+components:
+  schemas:
+    # ========================================================================
+    # Request Models
+    # ========================================================================
+    WriteRequest:
+      type: object
+      required:
+        - key
+        - value
+        - agent_id
+        - role
+        - vector_clock
+      properties:
+        key:
+          type: string
+          description: The memory key to write to
+          example: budget
+        value:
+          type: object
+          description: The value to write (any JSON-serializable object)
+          example: 5000
+        agent_id:
+          type: string
+          description: The ID of the agent performing the write
+          example: agent_a
+        role:
+          type: string
+          description: The role of the agent (used for access control)
+          example: admin
+        consistency_level:
+          $ref: "#/components/schemas/ConsistencyLevel"
+        conflict_strategy:
+          $ref: "#/components/schemas/ConflictStrategy"
+        vector_clock:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Vector clock for this write (agent_id -> counter)
+          example: { "agent_a": 1, "agent_b": 0 }
+
+    ReadRequest:
+      type: object
+      required:
+        - agent_id
+        - role
+      properties:
+        agent_id:
+          type: string
+          description: The ID of the agent performing the read
+          example: agent_a
+        role:
+          type: string
+          description: The role of the agent (used for access control)
+          example: admin
+        consistency_level:
+          $ref: "#/components/schemas/ConsistencyLevel"
+
+    RollbackRequest:
+      type: object
+      required:
+        - initiating_agent_id
+        - initiating_role
+      properties:
+        initiating_agent_id:
+          type: string
+          description: The ID of the agent initiating the rollback
+          example: admin_agent
+        initiating_role:
+          type: string
+          description: The role of the agent initiating the rollback
+          example: admin
+
+    RoleDefinition:
+      type: object
+      required:
+        - role_name
+        - can_read
+        - can_write
+      properties:
+        role_name:
+          type: string
+          description: Unique name for this role
+          example: budget-agent
+        can_read:
+          type: array
+          items:
+            type: string
+          description: List of key patterns this role can read (fnmatch style)
+          example: ["budget.*"]
+        can_write:
+          type: array
+          items:
+            type: string
+          description: List of key patterns this role can write (fnmatch style)
+          example: ["budget.*"]
+
+    # ========================================================================
+    # Response Models
+    # ========================================================================
+    MemoryEntry:
+      type: object
+      required:
+        - write_id
+        - key
+        - value
+        - agent_id
+        - role
+        - vector_clock
+        - consistency_level
+        - conflict_strategy
+        - status
+        - conflicting_writes
+        - timestamp
+      properties:
+        write_id:
+          type: string
+          format: uuid
+          description: Unique identifier for this write
+          example: 550e8400-e29b-41d4-a716-446655440000
+        key:
+          type: string
+          description: The memory key
+          example: budget
+        value:
+          type: object
+          description: The resolved value (may be None if flagged for human review)
+          example: 5000
+        agent_id:
+          type: string
+          description: The ID of the agent that performed the write
+          example: agent_a
+        role:
+          type: string
+          description: The role of the agent that performed the write
+          example: admin
+        vector_clock:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Vector clock at time of this write
+          example: { "agent_a": 1, "agent_b": 0 }
+        consistency_level:
+          $ref: "#/components/schemas/ConsistencyLevel"
+        conflict_strategy:
+          $ref: "#/components/schemas/ConflictStrategy"
+        status:
+          $ref: "#/components/schemas/MemoryStatus"
+        conflicting_writes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConflictingWrite"
+          description: List of writes that conflicted with this one (only if status=conflicted)
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of this write
+          example: "2026-05-05T10:30:00Z"
+
+    HistoryEntry:
+      type: object
+      required:
+        - write_id
+        - key
+        - value
+        - agent_id
+        - role
+        - vector_clock
+        - timestamp
+        - write_type
+      properties:
+        write_id:
+          type: string
+          format: uuid
+          description: Unique identifier for this history entry
+          example: 550e8400-e29b-41d4-a716-446655440000
+        key:
+          type: string
+          description: The memory key
+          example: budget
+        value:
+          type: object
+          description: The value at the time of this write
+          example: 5000
+        agent_id:
+          type: string
+          description: The agent ID that performed the write
+          example: agent_a
+        role:
+          type: string
+          description: The role of the agent
+          example: admin
+        vector_clock:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Vector clock at time of this write
+          example: { "agent_a": 1 }
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of this write
+          example: "2026-05-05T10:00:00Z"
+        write_type:
+          $ref: "#/components/schemas/WriteType"
+        rollback_of:
+          type: string
+          format: uuid
+          nullable: true
+          description: If write_type=rollback, the write_id of the entry being rolled back
+          example: null
+
+    ConflictingWrite:
+      type: object
+      required:
+        - write_id
+        - agent_id
+        - role
+        - value
+        - vector_clock
+        - timestamp
+      properties:
+        write_id:
+          type: string
+          format: uuid
+          description: The write_id of this conflicting value
+          example: 550e8400-e29b-41d4-a716-446655440002
+        agent_id:
+          type: string
+          description: The agent ID that wrote this conflicting value
+          example: agent_b
+        role:
+          type: string
+          description: The role of the agent
+          example: admin
+        value:
+          type: object
+          description: The conflicting value
+          example: 4200
+        vector_clock:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Vector clock of this write
+          example: { "agent_b": 1 }
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of this write
+          example: "2026-05-05T10:29:00Z"
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - storage
+        - version
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded]
+          description: Service health status
+          example: healthy
+        storage:
+          type: string
+          description: Name of the storage adapter in use
+          example: memory
+        version:
+          type: string
+          description: Engram version
+          example: "0.1.0"
+
+    # ========================================================================
+    # Error Response
+    # ========================================================================
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+          description: Error message
+          example: "Permission denied"
+
+    # ========================================================================
+    # Enums
+    # ========================================================================
+    ConsistencyLevel:
+      type: string
+      enum:
+        - eventual
+        - causal
+        - strong
+      description: |
+        Consistency level for reads and writes.
+        - `eventual`: Return immediately, may be stale (default)
+        - `causal`: Ensure causal consistency (not yet implemented)
+        - `strong`: Full consistency via quorum (not yet implemented)
+      example: eventual
+
+    ConflictStrategy:
+      type: string
+      enum:
+        - latest_clock
+        - highest_value
+        - lowest_value
+        - union
+        - flag_for_human
+      description: |
+        Strategy for resolving concurrent writes.
+        - `latest_clock`: Pick the value with the highest vector clock sum
+        - `highest_value`: Pick the numerically highest value
+        - `lowest_value`: Pick the numerically lowest value
+        - `union`: Keep all values as a list
+        - `flag_for_human`: Don't resolve, return None and mark as FLAGGED
+      example: latest_clock
+
+    MemoryStatus:
+      type: string
+      enum:
+        - ok
+        - conflicted
+        - flagged
+      description: |
+        Status of a memory entry.
+        - `ok`: Single value, no conflict
+        - `conflicted`: Multiple concurrent values detected and stored
+        - `flagged`: Conflict flagged for human review
+      example: ok
+
+    WriteType:
+      type: string
+      enum:
+        - write
+        - rollback
+      description: |
+        Type of history entry.
+        - `write`: Regular write
+        - `rollback`: Undo of a previous write
+      example: write
+
+  responses:
+    BadRequest:
+      description: Bad request - invalid input parameters or malformed request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            detail: "Invalid input: value must be JSON-serializable"
+
+    Forbidden:
+      description: Forbidden - agent's role lacks permission for this operation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            detail: "Permission denied: role 'auditor' cannot write to 'budget'"
+
+    UnprocessableEntity:
+      description: Unprocessable Entity - request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            detail: "Validation error: agent_id is required"
+
+    InternalServerError:
+      description: Internal Server Error - unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            detail: "Internal server error"

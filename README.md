@@ -10,6 +10,9 @@ When multiple AI agents share state via a plain dict or key-value store, the las
 
 Engram detects these concurrent writes using vector clocks, stores all conflicting values in a CRDT (Multi-Value Register), and resolves them using a configurable strategy — or flags them for human review.
 
+## Demo
+[This is the github link to the demo](https://github.com/lash106/Engram_demo/blob/main/README_demo.md)
+
 ## Core Concepts
 
 ### Vector Clocks

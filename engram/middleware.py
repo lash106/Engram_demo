@@ -200,7 +200,7 @@ class EngramMiddleware:
         history_entry = HistoryEntry(
             write_id=entry.write_id,
             key=entry.key,
-            value=entry.value,
+            value=request.value,
             agent_id=entry.agent_id,
             role=entry.role,
             vector_clock=entry.vector_clock,

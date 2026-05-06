@@ -38,8 +38,31 @@ class MVRegister:
     ) -> MVRegister:
         """
         Return a new MVRegister reflecting this write.
+
+        Logic:
+        1. Compare the incoming clock against each existing value's clock.
+        2. If incoming clock is AFTER all existing values: this write supersedes
+           everything. Return new MVRegister with only this value.
+        3. If incoming clock is CONCURRENT with any existing value: this is a
+           conflict. Keep the concurrent value(s) AND add this new value.
+           Result has multiple values.
+        4. If incoming clock is BEFORE any existing value: this is a stale write.
+           Discard it. Return self unchanged.
+        5. If the register is empty: just add the value.
+
+        Must NOT mutate self.
+
+        Args:
+            value: The value to write.
+            agent_id: ID of the agent performing the write.
+            role: Role of the agent performing the write.
+            clock: The VectorClock accompanying the write.
+
+        Returns:
+            A new MVRegister reflecting the updated state.
         """
         import uuid
+
         new_entry = ConflictingWrite(
             write_id=str(uuid.uuid4()),
             agent_id=agent_id,
@@ -49,60 +72,87 @@ class MVRegister:
             timestamp=datetime.now(timezone.utc),
         )
 
+        # Empty register — just add it
         if not self._values:
             result = MVRegister()
             result._values = [new_entry]
             return result
 
-        kept: list[ConflictingWrite] = []
-        incoming_dominated = False
+        # Compare incoming clock against each existing value's clock
+        has_concurrent = False
+        has_before = False
 
         for existing in self._values:
             existing_clock = VectorClock.from_dict(existing.vector_clock)
             ordering = existing_clock.compare(clock)
 
-            if ordering == Ordering.AFTER:
-                # existing dominates incoming — incoming is stale
-                incoming_dominated = True
-                kept.append(existing)
+            if ordering == Ordering.BEFORE:
+                # existing is BEFORE incoming → incoming is newer
+                continue
+            elif ordering == Ordering.AFTER:
+                # existing is AFTER incoming → incoming is stale
+                has_before = True
+                break
             elif ordering == Ordering.CONCURRENT:
-                # concurrent — keep both
-                kept.append(existing)
-            # if BEFORE or EQUAL — existing is dominated by incoming, drop it
+                has_concurrent = True
+            # EQUAL → treat like BEFORE (incoming supersedes or ties)
 
-        if incoming_dominated:
-            # incoming is stale, return unchanged
+        # Stale write — discard
+        if has_before:
+            return self
+
+        # Incoming is after everything — replace all
+        if not has_concurrent:
             result = MVRegister()
-            result._values = list(self._values)
+            result._values = [new_entry]
             return result
 
-        kept.append(new_entry)
+        # Concurrent — keep existing concurrent values + add new one
         result = MVRegister()
-        result._values = kept
+        result._values = list(self._values) + [new_entry]
         return result
 
     def merge(self, other: MVRegister) -> MVRegister:
         """
-        Merge two MVRegisters.
+        Merge two MVRegisters. Used when two nodes have diverged and need to sync.
+
+        Logic:
+        For each value in other._values:
+          - If its clock is AFTER any value in self._values: it replaces those.
+          - If its clock is CONCURRENT with values in self._values: add it.
+          - If its clock is BEFORE all values in self._values: discard it.
+
+        The result contains exactly the set of values that are not dominated
+        by any other value across both registers.
+
+        Must NOT mutate self or other.
+
+        Returns:
+            A new MVRegister containing the merged set of non-dominated values.
         """
-        combined = list(self._values) + list(other._values)
-        # Keep only values not dominated by any other
-        result_values: list[ConflictingWrite] = []
-        for candidate in combined:
+        # Pool all values from both registers
+        all_values = list(self._values) + list(other._values)
+
+        # Keep only values that aren't dominated by any other value
+        survivors = []
+        for candidate in all_values:
             candidate_clock = VectorClock.from_dict(candidate.vector_clock)
             dominated = False
-            for other_entry in combined:
-                if other_entry is candidate:
+
+            for other_val in all_values:
+                if other_val is candidate:
                     continue
-                other_clock = VectorClock.from_dict(other_entry.vector_clock)
-                if other_clock.compare(candidate_clock) == Ordering.AFTER:
+                other_clock = VectorClock.from_dict(other_val.vector_clock)
+                if candidate_clock.compare(other_clock) == Ordering.BEFORE:
+                    # candidate is older than other_val → dominated
                     dominated = True
                     break
+
             if not dominated:
-                result_values.append(candidate)
+                survivors.append(candidate)
 
         result = MVRegister()
-        result._values = result_values
+        result._values = survivors
         return result
 
     def resolve(
@@ -110,10 +160,29 @@ class MVRegister:
     ) -> tuple[Any, list[ConflictingWrite]]:
         """
         Apply a conflict resolution strategy and return the resolved value.
-        """
-        if not self._values:
-            return None, []
 
+        Returns:
+            A tuple of (resolved_value, list_of_conflicting_writes_that_were_not_chosen).
+
+        Strategies:
+        - LOWEST_VALUE: return the numerically lowest value. Assumes values
+          are comparable with <. Raise ValueError if they are not.
+        - HIGHEST_VALUE: return the numerically highest value.
+        - LATEST_CLOCK: return the value whose vector clock has the highest
+          sum of all counter values. Tie-break by latest timestamp.
+        - UNION: return a list containing all values. No value is discarded.
+          conflicting_writes will be empty since all are kept.
+        - FLAG_FOR_HUMAN: do NOT resolve. Return None as value and ALL values
+          as conflicting_writes. The caller must mark the entry as FLAGGED.
+
+        If only one value exists (no conflict), return it directly with
+        empty conflicting_writes regardless of strategy.
+
+        Raises:
+            ValueError: If strategy is LOWEST_VALUE or HIGHEST_VALUE and values
+                        are not comparable.
+        """
+        # No conflict — return the single value directly
         if len(self._values) == 1:
             return self._values[0].value, []
 
@@ -121,43 +190,37 @@ class MVRegister:
             return None, list(self._values)
 
         if strategy == ConflictStrategy.UNION:
-            all_vals = [cw.value for cw in self._values]
-            return all_vals, []
+            return [v.value for v in self._values], []
 
         if strategy == ConflictStrategy.LATEST_CLOCK:
-            def clock_sum(cw: ConflictingWrite) -> tuple[int, datetime]:
-                s = sum(VectorClock.from_dict(cw.vector_clock).to_dict().values())
-                return (s, cw.timestamp)
-            winner = max(self._values, key=clock_sum)
-            losers = [cw for cw in self._values if cw is not winner]
-            return winner.value, losers
+            winner = max(
+                self._values,
+                key=lambda v: (sum(v.vector_clock.values()), v.timestamp),
+            )
+        elif strategy == ConflictStrategy.LOWEST_VALUE:
+            winner = min(self._values, key=lambda v: v.value)
+        elif strategy == ConflictStrategy.HIGHEST_VALUE:
+            winner = max(self._values, key=lambda v: v.value)
 
-        if strategy == ConflictStrategy.LOWEST_VALUE:
-            try:
-                winner = min(self._values, key=lambda cw: float(cw.value))
-            except (TypeError, ValueError):
-                winner = min(self._values, key=lambda cw: str(cw.value))
-            losers = [cw for cw in self._values if cw is not winner]
-            return winner.value, losers
-
-        if strategy == ConflictStrategy.HIGHEST_VALUE:
-            try:
-                winner = max(self._values, key=lambda cw: float(cw.value))
-            except (TypeError, ValueError):
-                winner = max(self._values, key=lambda cw: str(cw.value))
-            losers = [cw for cw in self._values if cw is not winner]
-            return winner.value, losers
-
-        # fallback — latest clock
-        winner = max(self._values, key=lambda cw: sum(VectorClock.from_dict(cw.vector_clock).to_dict().values()))
-        losers = [cw for cw in self._values if cw is not winner]
+        losers = [v for v in self._values if v is not winner]
         return winner.value, losers
 
     def is_conflicted(self) -> bool:
-        """Return True if two or more concurrent values exist."""
+        """
+        Return True if and only if there are two or more values in this register,
+        meaning concurrent writes exist that have not been resolved.
+
+        Returns:
+            True if conflicted, False otherwise.
+        """
         return len(self._values) >= 2
 
     @property
     def values(self) -> list[ConflictingWrite]:
-        """Return a copy of all current values."""
+        """
+        Return a copy of all current values in this register.
+
+        Returns:
+            A list of ConflictingWrite objects (copy, not reference).
+        """
         return list(self._values)

@@ -1,0 +1,735 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Engram API",
+    "description": "Memory middleware for multi-agent AI systems.\n\nEngram sits between your AI agents and shared state, providing conflict detection, causal ordering, access control, and a full audit trail — so multiple agents can read and write to the same memory without silently overwriting each other.\n\n## Core Features\n- **Conflict Detection**: Uses vector clocks to detect concurrent writes\n- **CRDT Storage**: Multi-Value Register stores all conflicting values\n- **Conflict Resolution**: Configurable strategies (latest_clock, highest_value, lowest_value, union, flag_for_human)\n- **Role-Based Access Control**: Fine-grained permissions with fnmatch patterns\n- **Immutable Audit Trail**: Complete history with time-travel queries\n- **Storage Agnostic**: Pluggable adapters (memory, Redis, future: Chroma, Pinecone)\n\n## Authentication\nCurrently, Engram uses role-based access control at the API level. All write and read operations require `agent_id` and `role` parameters which are validated against registered role definitions.\n\n## Quick Start\n1. Register a role: `POST /roles`\n2. Write a value: `POST /write`\n3. Read a value: `GET /read/{key}`\n4. Query history: `GET /history/{key}`",
+    "version": "0.1.0",
+    "contact": {
+      "name": "Engram Support",
+      "url": "https://github.com/lash106/Engram"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000",
+      "description": "Local development server",
+      "variables": {
+        "host": {
+          "default": "localhost"
+        },
+        "port": {
+          "default": "8000"
+        }
+      }
+    },
+    {
+      "url": "http://{host}:{port}",
+      "description": "Custom server",
+      "variables": {
+        "host": {
+          "default": "localhost",
+          "description": "Server hostname or IP"
+        },
+        "port": {
+          "default": "8000",
+          "description": "Server port"
+        }
+      }
+    }
+  ],
+  "tags": [
+    {
+      "name": "Memory Operations",
+      "description": "Read and write shared memory with conflict detection"
+    },
+    {
+      "name": "History & Audit",
+      "description": "Query write history and perform time-travel snapshots"
+    },
+    {
+      "name": "Role Management",
+      "description": "Define and manage role-based access control"
+    },
+    {
+      "name": "System",
+      "description": "System health and diagnostics"
+    }
+  ],
+  "paths": {
+    "/write": {
+      "post": {
+        "tags": ["Memory Operations"],
+        "summary": "Write a value to shared memory",
+        "description": "Write a value to shared memory with conflict detection and resolution.\n\nThe full write pipeline includes:\n1. Permission check (AccessPolicy)\n2. Vector clock increment\n3. Conflict detection (compare with existing clock)\n4. Conflict resolution (apply strategy if concurrent)\n5. History logging (immutable audit trail)\n6. Persistence (storage adapter)\n\n**Permission Requirements**: The `role` must have write permission for the key.",
+        "operationId": "write_memory",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WriteRequest"
+              },
+              "examples": {
+                "simple_write": {
+                  "summary": "Simple write with admin role",
+                  "value": {
+                    "key": "budget",
+                    "value": 5000,
+                    "agent_id": "agent_a",
+                    "role": "admin",
+                    "vector_clock": {
+                      "agent_a": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Write successful. Returns the resolved MemoryEntry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/read/{key}": {
+      "get": {
+        "tags": ["Memory Operations"],
+        "summary": "Read a value from shared memory",
+        "description": "Read the current value of a memory key.\n\nThe read pipeline includes:\n1. Permission check (agent must have read permission)\n2. Storage lookup\n3. Consistency level enforcement\n\n**Permission Requirements**: The `role` must have read permission for the key.",
+        "operationId": "read_memory",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "description": "The memory key to read",
+            "schema": {
+              "type": "string",
+              "example": "budget"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": true,
+            "description": "The ID of the agent performing the read",
+            "schema": {
+              "type": "string",
+              "example": "agent_a"
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "required": true,
+            "description": "The role of the agent (used for access control)",
+            "schema": {
+              "type": "string",
+              "example": "admin"
+            }
+          },
+          {
+            "name": "consistency_level",
+            "in": "query",
+            "required": false,
+            "description": "Consistency level for the read",
+            "schema": {
+              "$ref": "#/components/schemas/ConsistencyLevel"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEntry"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Key not found"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/history/{key}": {
+      "get": {
+        "tags": ["History & Audit"],
+        "summary": "Get write history for a key",
+        "description": "Query the immutable history log for all writes to a given key.\n\nReturns all HistoryEntry records in chronological order.",
+        "operationId": "get_history",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "History retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HistoryEntry"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/snapshot/{key}": {
+      "get": {
+        "tags": ["History & Audit"],
+        "summary": "Time-travel query - get key value at causal time",
+        "operationId": "get_snapshot",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_clock",
+            "in": "query",
+            "required": true,
+            "description": "JSON-encoded vector clock dict",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Snapshot found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryEntry"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No snapshot found"
+          }
+        }
+      }
+    },
+    "/rollback/{write_id}": {
+      "post": {
+        "tags": ["Memory Operations"],
+        "summary": "Roll back a previous write",
+        "operationId": "rollback",
+        "parameters": [
+          {
+            "name": "write_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RollbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rollback successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEntry"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Write not found"
+          }
+        }
+      }
+    },
+    "/roles": {
+      "post": {
+        "tags": ["Role Management"],
+        "summary": "Register or update a role",
+        "operationId": "register_role",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleDefinition"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Role registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleDefinition"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/roles/{role_name}": {
+      "get": {
+        "tags": ["Role Management"],
+        "summary": "Get a role definition",
+        "operationId": "get_role",
+        "parameters": [
+          {
+            "name": "role_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Role found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleDefinition"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Role not found"
+          }
+        }
+      }
+    },
+    "/keys": {
+      "get": {
+        "tags": ["System"],
+        "summary": "List all keys in storage",
+        "operationId": "list_keys",
+        "parameters": [
+          {
+            "name": "prefix",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of keys",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Health check",
+        "operationId": "health_check",
+        "responses": {
+          "200": {
+            "description": "Health status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "WriteRequest": {
+        "type": "object",
+        "required": ["key", "value", "agent_id", "role", "vector_clock"],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "value": {
+            "type": "object"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "consistency_level": {
+            "$ref": "#/components/schemas/ConsistencyLevel"
+          },
+          "conflict_strategy": {
+            "$ref": "#/components/schemas/ConflictStrategy"
+          },
+          "vector_clock": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "ReadRequest": {
+        "type": "object",
+        "required": ["agent_id", "role"],
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "consistency_level": {
+            "$ref": "#/components/schemas/ConsistencyLevel"
+          }
+        }
+      },
+      "RollbackRequest": {
+        "type": "object",
+        "required": ["initiating_agent_id", "initiating_role"],
+        "properties": {
+          "initiating_agent_id": {
+            "type": "string"
+          },
+          "initiating_role": {
+            "type": "string"
+          }
+        }
+      },
+      "RoleDefinition": {
+        "type": "object",
+        "required": ["role_name", "can_read", "can_write"],
+        "properties": {
+          "role_name": {
+            "type": "string"
+          },
+          "can_read": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "can_write": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "MemoryEntry": {
+        "type": "object",
+        "required": [
+          "write_id",
+          "key",
+          "value",
+          "agent_id",
+          "role",
+          "vector_clock",
+          "consistency_level",
+          "conflict_strategy",
+          "status",
+          "conflicting_writes",
+          "timestamp"
+        ],
+        "properties": {
+          "write_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "key": {
+            "type": "string"
+          },
+          "value": {
+            "type": "object"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "vector_clock": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "consistency_level": {
+            "$ref": "#/components/schemas/ConsistencyLevel"
+          },
+          "conflict_strategy": {
+            "$ref": "#/components/schemas/ConflictStrategy"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MemoryStatus"
+          },
+          "conflicting_writes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConflictingWrite"
+            }
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "HistoryEntry": {
+        "type": "object",
+        "required": [
+          "write_id",
+          "key",
+          "value",
+          "agent_id",
+          "role",
+          "vector_clock",
+          "timestamp",
+          "write_type"
+        ],
+        "properties": {
+          "write_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "key": {
+            "type": "string"
+          },
+          "value": {
+            "type": "object"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "vector_clock": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "write_type": {
+            "$ref": "#/components/schemas/WriteType"
+          },
+          "rollback_of": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        }
+      },
+      "ConflictingWrite": {
+        "type": "object",
+        "required": [
+          "write_id",
+          "agent_id",
+          "role",
+          "value",
+          "vector_clock",
+          "timestamp"
+        ],
+        "properties": {
+          "write_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "value": {
+            "type": "object"
+          },
+          "vector_clock": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": ["status", "storage", "version"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["healthy", "degraded"]
+          },
+          "storage": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["detail"],
+        "properties": {
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "ConsistencyLevel": {
+        "type": "string",
+        "enum": ["eventual", "causal", "strong"]
+      },
+      "ConflictStrategy": {
+        "type": "string",
+        "enum": [
+          "latest_clock",
+          "highest_value",
+          "lowest_value",
+          "union",
+          "flag_for_human"
+        ]
+      },
+      "MemoryStatus": {
+        "type": "string",
+        "enum": ["ok", "conflicted", "flagged"]
+      },
+      "WriteType": {
+        "type": "string",
+        "enum": ["write", "rollback"]
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Bad request"
+      },
+      "Forbidden": {
+        "description": "Forbidden - insufficient permissions"
+      },
+      "UnprocessableEntity": {
+        "description": "Validation error"
+      },
+      "InternalServerError": {
+        "description": "Internal server error"
+      }
+    }
+  }
+}
