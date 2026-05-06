@@ -26,6 +26,7 @@ from engram.models import (
     RollbackRequest,
     WriteRequest,
 )
+from tests.conftest import access_policy
 
 
 @asynccontextmanager
@@ -51,6 +52,11 @@ async def lifespan(app: FastAPI):
     app.state.access_policy = access_policy
     app.state.history_log = history_log
     app.state.middleware = middleware
+    access_policy.register_role("admin", can_read=["*"], can_write=["*"])
+    access_policy.register_role("budget-agent", can_read=["budget.*"], can_write=["budget.*"])
+    access_policy.register_role("inventory-agent", can_read=["inventory.*"], can_write=["inventory.*"])
+    access_policy.register_role("planner", can_read=["*"], can_write=["task.*"])
+    access_policy.register_role("executor", can_read=["task.*"], can_write=["task.*"])
 
     yield
 
